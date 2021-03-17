@@ -99,9 +99,11 @@ add_to_card = """
 <script type="text/javascript">
 function ct_click(tag) {
     pycmd("ct_click_" + tag)
+    return false;
 }
 function ct_dblclick(tag, deck) {
     pycmd("ct_dblclick_" + tag + "|" + deck)
+    return false;
 }
 </script>
 """
@@ -122,18 +124,37 @@ def on_field_filter(text, field, filter, context: TemplateRenderContext):
     if filter != "clickable" or field != "Tags":
         return text
 
-    kbd = """
-<kbd onclick="ct_click('{tag}')" ondblclick="ct_dblclick('{tag}', '{deck}')">
-  {tag}
-</kbd>
-"""
+    tags = sorted(context.fields()["Tags"].split())
+    tag_tree = list()
+    tag_tracker = dict()
+    # tree is [{'name':'tagName','sub':[]}] where `sub` contains subtrees
+    # tracker is ['tagName':treeObj]
 
-    return "".join(
-        [
-            kbd.format(tag=tag, deck=context.fields()["Deck"])
-            for tag in context.fields()["Tags"].split()
-        ]
-    )
+    SEPARATOR = "::"# TODO: configurable SEPARATOR
+    for t in tags:
+        components = t.split(SEPARATOR)
+        for idx, c in enumerate(components):
+            partial_tag = SEPARATOR.join(components[0 : idx + 1])
+            if not tag_tracker.get(partial_tag):
+                treeObj = {'name':partial_tag,'sub':list()}
+                tag_tracker[partial_tag] = treeObj
+                if idx == 0:
+                    tag_tree.append(treeObj)
+                else:
+                    parent_tag = SEPARATOR.join(components[0:idx])
+                    parent = tag_tracker[parent_tag]
+                    parent['sub'].append(treeObj)
+
+    def _add_kbd_tag_recursive(tag_tree,deck):
+        kbd_start = """<kbd onclick="var event=arguments[0]||window.event;if(event.target==this) ct_click('{tag}');" ondblclick="var event=arguments[0]||window.event;if(event.target==this) ct_dblclick('{tag}', '{deck}');">{short_tag}"""
+        kbd_end = "</kbd>"
+        return "".join(["{start}{inner}{end}".format(
+            start = kbd_start.format(tag=tagObj['name'],short_tag=tagObj['name'].split(SEPARATOR)[-1],deck=deck),
+            inner = _add_kbd_tag_recursive(tagObj['sub'],deck),
+            end = kbd_end)
+         for tagObj in tag_tree])
+
+    return _add_kbd_tag_recursive(tag_tree,context.fields()["Deck"])
 
 
 hooks.field_filter.append(on_field_filter)
